@@ -15,13 +15,13 @@ Rust + [gpui](https://gpui.rs) 实现。
 `bluetooth_config.h` 会直接 `#error`。重新编译烧录后,设备会枚举出一个
 USB 虚拟串口。
 
-固件里有两个采集点,**同时开启会把两路数据交错写进同一个环形缓冲**,分析时
-只留一个:
+默认运行时只有 `app/_mesh_audio_/intercom.c` 会写 WAV 包(`CODEC_MSG_TEST_AUDIO` 的音频定时器默认被注释掉,只有 2 ms 监控定时器工作):
 
 | 位置 | 高 16 位 | 低 16 位 |
 |---|---|---|
-| `app/_mesh_audio_/intercom.c`(NN 降噪前后对比) | 降噪前 | 降噪后 |
-| `bluetooth/subsys/codec/codec_task.c`(codec 原始) | 左 | 右 |
+| `app/_mesh_audio_/intercom.c` | 降噪前(ASRC 输出) | 降噪后(NN NS 输出) |
+
+> 只有在故意启用 `codec_tese_audio_timer` 时,`bluetooth/subsys/codec/codec_task.c` 才会额外写一路原始 mic 数据。普通使用不必关心。
 
 ## 构建与运行
 
@@ -51,6 +51,15 @@ cargo run --release
 | 通道模式 | 双通道(高+低)/ 仅高 16 位 / 仅低 16 位。做降噪 A/B 对比用双通道。 |
 | 采样率 | 「自动」采用包头里的 `sample_rate` 字段;也可强制为 16000/8000。 |
 | 波特率 | CDC 虚拟串口通常忽略,保留以便适配。 |
+
+## 串口选择
+
+TL7218 CDC 复合设备会枚举出两个虚拟 COM 口:
+
+- **第一个 COM 口(接口 0)** — `usb_com_write`/`WAV_RECORD_EN` 走这里,工具要用这个口。
+- **第二个 COM 口(接口 1)** — `cdc_console_flush` 输出,也就是 shell 命令行。
+
+工具打开端口后会显式置位 **DTR + RTS**。固件 `usb_cdc_tx_request` 只有在 `cdc_line_state == 0x03` 时才会真正发送数据(`serialport-rs` 在 Windows 上默认不置这两根线,因此必须主动置位,否则会收到 0 字节)。
 
 ## 数据位置
 

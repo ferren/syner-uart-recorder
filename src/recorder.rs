@@ -61,10 +61,18 @@ impl Session {
 
         // Fail fast on the main thread so the UI can show a real error instead of
         // silently spawning a thread that dies immediately.
-        let port = serialport::new(&port_name, settings.baud)
+        let mut port = serialport::new(&port_name, settings.baud)
             .timeout(Duration::from_millis(100))
             .open()
             .with_context(|| format!("无法打开串口 {port_name}"))?;
+
+        // The firmware drops every packet unless the CDC line state reads 0x03
+        // (see `usb_cdc_tx_request` in bluetooth/subsys/usb/if_usb.c), and
+        // serialport-rs clears both lines on Windows. Assert them explicitly.
+        port.write_data_terminal_ready(true)
+            .context("无法置位 DTR (固件要求 DTR+RTS 均有效才会发送数据)")?;
+        port.write_request_to_send(true)
+            .context("无法置位 RTS (固件要求 DTR+RTS 均有效才会发送数据)")?;
 
         let stop = Arc::new(AtomicBool::new(false));
         let status = Arc::new(Mutex::new(Status::default()));
